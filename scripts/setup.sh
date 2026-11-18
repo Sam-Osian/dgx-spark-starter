@@ -15,8 +15,9 @@ Usage: bash scripts/setup.sh [options]
   --python-only  Install/reuse uv and sync the Python environment; no sudo
   -h, --help     Show this help
 
-Default models: gemma4:e4b and gemma4:26b. Existing Ollama and VS Code
-installations are reused. No system-wide upgrade or driver install is run.
+Installs Docker Engine and Compose for the browser interface.
+Default models: gemma4:e4b and gemma4:26b. Existing installations are reused.
+No system-wide upgrade or driver install is run.
 EOF
 }
 for arg in "$@"; do
@@ -53,6 +54,7 @@ if (( ! python_only )); then
     sudo -v
     sudo apt-get update
     sudo apt-get install -y ca-certificates curl git python3 zstd pciutils
+    bash "$ROOT/scripts/install-docker.sh"
     if (( ollama_install )); then
         if ! command -v ollama >/dev/null; then
             temp=$(mktemp -d)
@@ -83,5 +85,6 @@ if (( ! python_only && models )); then
 fi
 echo 'Python environment ready. Try:'
 echo "  cd \"$ROOT\""
-echo '  uv run --locked python examples/local_agent.py chat "Explain what a local LLM is."'
+echo '  bash scripts/start-webui.sh   # Browser chat'
+echo '  uv run --locked python agent.py   # Editable interactive agent'
 echo '  bash scripts/doctor.sh'

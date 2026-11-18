@@ -1,0 +1,20 @@
+name: dgx-spark-starter
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.13.4-slim
+    network_mode: host
+    environment:
+      HOST: 127.0.0.1
+      PORT: "8080"
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      ENABLE_OPENAI_API: "false"
+      WEBUI_AUTH: "true"
+      SPARK_WORKSPACE: /workspace
+    env_file:
+      - .local/webui.env
+    volumes:
+      - webui-data:/app/backend/data
+      - ./workspace:/workspace:ro
+    restart: unless-stopped
+volumes:
+  webui-data:

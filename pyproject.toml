@@ -5,7 +5,7 @@ description = "Local Gemma and Pydantic AI prototypes on DGX Spark"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "pydantic-ai-slim[openai]==2.70.0",
+    "pydantic-ai-slim[cli,openai]==2.70.0",
 ]
 
 [tool.uv]
