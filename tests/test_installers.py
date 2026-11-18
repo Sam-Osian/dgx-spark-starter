@@ -25,17 +25,22 @@ elif name == "nvidia-smi":
 elif name == "sudo":
     if args == ["-v"]: sys.exit(0)
     sys.exit(subprocess.run(args).returncode)
-elif name == "python3" and args[:2] == ["-m", "venv"]:
-    target = pathlib.Path(args[2]) / "bin" / "python"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("#!/bin/sh\nexit 0\n")
-    target.chmod(0o755)
+elif name == "uv" and args[:1] == ["sync"]:
+    if os.getenv("TEST_UV_SYNC_FAIL"): sys.exit(1)
 elif name == "dpkg":
     print("arm64")
 elif name == "dpkg-deb":
     print(os.getenv("TEST_CODE_ARCH", "arm64"))
 elif name == "curl":
-    pathlib.Path(args[args.index("-o") + 1]).write_text("fake package")
+    content = "fake package"
+    if "https://astral.sh/uv/install.sh" in args:
+        content = """#!/bin/sh
+set -e
+mkdir -p "$UV_INSTALL_DIR"
+cp "$FAKE_UV_SOURCE" "$UV_INSTALL_DIR/uv"
+chmod +x "$UV_INSTALL_DIR/uv"
+"""
+    pathlib.Path(args[args.index("-o") + 1]).write_text(content)
 '''
 
 
@@ -45,12 +50,17 @@ class InstallerTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         shutil.copytree(ROOT / "scripts", self.root / "scripts")
-        (self.root / "requirements.txt").write_text("")
         self.bin = self.root / "fake-bin"
         self.bin.mkdir()
         self.log = self.root / "commands.jsonl"
-        self.env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "COMMAND_LOG": str(self.log)}
-        for name in ["uname", "nvidia-smi", "sudo", "apt-get", "python3", "ollama", "code", "systemctl", "dpkg", "dpkg-deb", "curl"]:
+        self.env = {
+            **os.environ,
+            "PATH": f"{self.bin}:/usr/bin:/bin",
+            "COMMAND_LOG": str(self.log),
+            "UV_INSTALL_DIR": str(self.root / "installed-uv"),
+            "FAKE_UV_SOURCE": str(self.bin / "uv-source"),
+        }
+        for name in ["uname", "nvidia-smi", "sudo", "apt-get", "uv", "uv-source", "ollama", "code", "systemctl", "dpkg", "dpkg-deb", "curl"]:
             self.stub(name)
 
     def stub(self, name):
@@ -78,7 +88,23 @@ class InstallerTest(unittest.TestCase):
     def test_python_only_makes_no_system_or_model_calls(self):
         result, calls = self.run_script("setup.sh", "--python-only")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(all(c[0] == "python3" for c in calls), calls)
+        self.assertTrue(all(c[0] == "uv" for c in calls), calls)
+        self.assertIn(["uv", "sync", "--locked", "--project", str(self.root)], calls)
+
+    def test_missing_uv_is_installed_and_used_in_the_same_setup(self):
+        (self.bin / "uv").unlink()
+        result, calls = self.run_script("setup.sh", "--python-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((Path(self.env["UV_INSTALL_DIR"]) / "uv").is_file())
+        self.assertTrue(any(c[0] == "curl" and "https://astral.sh/uv/install.sh" in c for c in calls))
+        self.assertIn(["uv", "sync", "--locked", "--project", str(self.root)], calls)
+        self.assertNotIn("sudo", [c[0] for c in calls])
+
+    def test_failed_sync_stops_before_model_downloads(self):
+        self.env["TEST_UV_SYNC_FAIL"] = "1"
+        result, calls = self.run_script("setup.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c[:2] == ["ollama", "pull"] for c in calls))
 
     def test_bad_architecture_stops_before_system_changes(self):
         self.env["TEST_ARCH"] = "x86_64"

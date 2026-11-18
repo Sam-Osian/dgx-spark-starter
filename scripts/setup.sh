@@ -12,7 +12,7 @@ Usage: bash scripts/setup.sh [options]
   --skip-vscode   Skip VS Code installation (e.g. use Remote SSH)
   --skip-models   Skip all model downloads
   --skip-ollama   Use an existing Ollama installation/server
-  --python-only  Only create/update the project Python environment; no sudo
+  --python-only  Install/reuse uv and sync the Python environment; no sudo
   -h, --help     Show this help
 
 Default models: gemma4:e4b and gemma4:26b. Existing Ollama and VS Code
@@ -52,7 +52,7 @@ if (( ! python_only )); then
     fi
     sudo -v
     sudo apt-get update
-    sudo apt-get install -y ca-certificates curl git python3 python3-venv zstd pciutils
+    sudo apt-get install -y ca-certificates curl git python3 zstd pciutils
     if (( ollama_install )); then
         if ! command -v ollama >/dev/null; then
             temp=$(mktemp -d)
@@ -74,13 +74,14 @@ if (( ! python_only )); then
         bash "$ROOT/scripts/install-vscode.sh"
     fi
 fi
-python3 -c 'import sys; assert sys.version_info >= (3, 11), "Python 3.11+ required"'
-python3 -m venv "$ROOT/.venv"
-"$ROOT/.venv/bin/python" -m pip install --require-hashes -r "$ROOT/requirements.txt"
+# A newly installed uv must also be available in this setup process.
+export PATH="${UV_INSTALL_DIR:-"$HOME/.local/bin"}:$PATH"
+bash "$ROOT/scripts/install-uv.sh"
+uv sync --locked --project "$ROOT"
 if (( ! python_only && models )); then
     bash "$ROOT/scripts/pull-models.sh" gemma4:e4b gemma4:26b
 fi
 echo 'Python environment ready. Try:'
 echo "  cd \"$ROOT\""
-echo '  .venv/bin/python examples/local_agent.py chat "Explain what a local LLM is."'
+echo '  uv run --locked python examples/local_agent.py chat "Explain what a local LLM is."'
 echo '  bash scripts/doctor.sh'

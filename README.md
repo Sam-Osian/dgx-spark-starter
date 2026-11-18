@@ -1,6 +1,6 @@
 # DGX Spark local LLM starter
 
-Set up Ollama, two Gemma models, VS Code for **Linux ARM64**, and a small
+Set up Ollama, two Gemma models, uv, VS Code for **Linux ARM64**, and a small
 [Pydantic AI](https://pydantic.dev/docs/ai/) project on a DGX Spark.
 
 ## First install
@@ -28,8 +28,9 @@ The owner must give their supervisor repository access before they can clone it.
 
 The installer installs prerequisite apt packages, uses the official Ollama
 installer if Ollama is missing, enables its startup service when available,
-installs Microsoft's ARM64 VS Code package if `code` is missing, creates `.venv`,
-and installs the hash-locked Python dependencies. It then downloads:
+installs Microsoft's ARM64 VS Code package if `code` is missing, and installs
+uv for your user if it is missing. `uv sync --locked` creates `.venv` and installs
+the exact Python dependencies from `uv.lock`. It then downloads:
 
 | Model | Purpose | Approximate model download |
 | --- | --- | --- |
@@ -41,7 +42,7 @@ runtime memory also includes context and inference overhead. Start with short
 prompts rather than allocating the advertised maximum context.
 
 Run the installer **without sudo**; it asks for sudo for system steps. Existing
-Ollama, VS Code, and model data are reused. It does not upgrade existing Ollama
+Ollama, uv, VS Code, and model data are reused. It does not upgrade existing Ollama
 or VS Code installations, change the firewall, or run an OS-wide upgrade.
 The upstream Ollama installer is downloaded over HTTPS and run with its normal
 privileges; review [that installer](https://ollama.com/install.sh) if desired.
@@ -55,14 +56,39 @@ bash scripts/setup.sh                    # Gemma 4 pair, including tool calling
 bash scripts/setup.sh --skip-vscode      # Editor on another computer via SSH
 bash scripts/setup.sh --skip-models      # Install software; download models later
 bash scripts/setup.sh --skip-ollama      # Use an existing Ollama server
-bash scripts/setup.sh --python-only      # Python environment only, no sudo/downloaded models
+bash scripts/setup.sh --python-only      # Install uv + Python environment, no sudo/models
+bash scripts/install-uv.sh               # Install/reuse uv only, without sudo
 bash scripts/pull-models.sh gemma3:4b gemma3:12b  # Optional Gemma 3 comparison
 bash scripts/pull-models.sh qwen3:8b             # Optional alternative tool model
 ```
 
-Python-only setup requires Python 3.11+ with venv/pip available. All other setup
-modes install system prerequisites and require sudo. Rerunning setup is useful
-after a partial failure; it reuses downloaded model blobs.
+Python-only setup needs curl if uv is not installed yet. The full setup installs
+curl for you. uv uses Python 3.12, selected by `.python-version`; it reuses a
+compatible interpreter or downloads one if needed. No separate pip/venv install
+is required. All other setup modes install system prerequisites and require sudo.
+Rerunning setup is useful after a partial failure; it reuses downloaded model blobs.
+
+## Work with uv
+
+The installer uses Astral's [official uv installer](https://astral.sh/uv/install.sh)
+to install into `~/.local/bin` without sudo. Existing uv installations are reused.
+Open a new terminal after installation, or run `export PATH="$HOME/.local/bin:$PATH"`
+in the current terminal. Setup itself makes uv available immediately. You can
+choose another install directory with `UV_INSTALL_DIR`.
+
+```bash
+git pull
+bash scripts/setup.sh --python-only  # Existing users: install uv and migrate .venv
+uv sync --locked                    # Install exactly what uv.lock specifies
+uv run --locked python examples/local_agent.py chat "Hello from my Spark"
+uv add your-package                 # Add a dependency and update uv.lock
+```
+
+`pyproject.toml` declares the project dependencies, and the committed `uv.lock`
+records their resolved versions and hashes. Setup fails if the lockfile is stale,
+so it cannot silently resolve different dependencies on Dan's machine. uv manages
+the project's `.venv`; no manual activation is needed with `uv run`. Migration
+reuses or recreates that environment for Python 3.12 as needed.
 
 ## Try the examples
 
@@ -73,16 +99,16 @@ connect to Ollama on loopback, with no cloud provider configured.
 ollama run gemma4:e4b
 # Type /bye to leave the interactive chat.
 
-.venv/bin/python examples/local_agent.py chat \
+uv run --locked python examples/local_agent.py chat \
   "Suggest three small research prototypes using a local LLM."
 
-.venv/bin/python examples/local_agent.py chat \
+uv run --locked python examples/local_agent.py chat \
   "Suggest three small research prototypes using a local LLM." --model gemma4:26b
 
-.venv/bin/python examples/local_agent.py extract \
+uv run --locked python examples/local_agent.py extract \
   "We want a local assistant to turn meeting notes into action items. First collect sample notes, then evaluate extraction quality. We have not chosen a success metric."
 
-.venv/bin/python examples/local_agent.py tools \
+uv run --locked python examples/local_agent.py tools \
   "Use your tool to estimate how many minutes a 17 GB model takes to download at 100 Mbps."
 ```
 
@@ -140,7 +166,7 @@ there with `bash scripts/setup.sh --python-only`, then forward Ollama over SSH:
 ssh -N -L 11435:127.0.0.1:11434 your-user@your-spark
 # In another laptop terminal, from the repository:
 OLLAMA_BASE_URL=http://127.0.0.1:11435/v1 \
-  .venv/bin/python examples/local_agent.py chat "Hello from my laptop"
+  uv run --locked python examples/local_agent.py chat "Hello from my laptop"
 ```
 
 Leave Ollama on its default loopback binding. Its local API has no built-in
@@ -183,7 +209,7 @@ tools demo says the model does not support tools, use `gemma4:26b`; a temperatur
 of zero does not guarantee every model will choose the correct tool. The
 script reports failure if the model answers without calling the example tool.
 
-The Python dependencies are fully pinned with hashes in `requirements.txt`.
+The Python dependencies are fully pinned with hashes in `uv.lock`.
 The system packages, vendor installer, and Ollama model tags track their
 upstream releases, so the entire machine setup is not bit-for-bit reproducible.
 For experiments, record `ollama --version`, `ollama list` (including model IDs),
@@ -192,25 +218,35 @@ the GPU driver version, and your repository commit alongside the results.
 Developer checks (no GPU, cloud credentials, or model downloads needed):
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+uv run --locked python -m unittest discover -s tests -v
+uv lock --check
+uv pip check --python .venv/bin/python
 for script in scripts/*.sh; do bash -n "$script"; done
 ```
 
-Validated on 18 November 2026 on an ARM64 Spark with Python 3.11.15 and Ollama
-0.22.0: Python-only setup, dependency consistency, all 11 automated tests, and
-ShellCheck passed. Live Gemma 3 27B chat/typed extraction and Gemma 4 26B tool
-calling also passed against already installed models. A fresh-machine apt,
+The uv migration was checked on ARM64 with Python 3.12.3: an existing uv 0.11.8
+installation and a real fresh uv 0.13.9 installation both synced successfully.
+All 13 automated tests, lockfile/dependency checks, and ShellCheck passed. The
+fresh uv install used a temporary directory without changing shell profiles.
+
+The initial version was validated on 18 November 2026 on an ARM64 Spark with
+Python 3.11.15 and Ollama 0.22.0. Live Gemma 3 27B chat/typed extraction and
+Gemma 4 26B tool calling passed against already installed models. A fresh-machine apt,
 Ollama, and VS Code installation has not been run; system-install behavior was
 tested with fake commands. The E4B model was not downloaded during verification.
 
-To intentionally update Python dependencies, edit `requirements.in`, regenerate
-with `uv pip compile --universal --generate-hashes requirements.in -o requirements.txt`,
-then rerun setup and the tests. Runtime setup does not require uv.
+To intentionally update Python dependencies, use `uv add` / `uv remove`, or edit
+`pyproject.toml` and run `uv lock`. Pydantic AI is explicitly pinned: use
+`uv add 'pydantic-ai-slim[openai]==NEW_VERSION'` to change that version. For other
+updates use `uv lock --upgrade-package PACKAGE`, then `uv sync --locked` and the
+tests. Commit both `pyproject.toml` and `uv.lock` when dependencies change.
 
 ## References
 
 - [Ollama Linux installation](https://docs.ollama.com/linux)
 - [Ollama hardware support](https://docs.ollama.com/gpu)
+- [uv installation](https://docs.astral.sh/uv/getting-started/installation/)
+- [uv project workflow](https://docs.astral.sh/uv/guides/projects/)
 - [Gemma 3 model tags and sizes](https://ollama.com/library/gemma3)
 - [Gemma 4 model tags, sizes, and tool support](https://ollama.com/library/gemma4)
 - [Qwen 3 8B and tool support](https://ollama.com/library/qwen3:8b)

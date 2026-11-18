@@ -1,2 +1,0 @@
-# Update with: uv pip compile --universal --generate-hashes requirements.in -o requirements.txt
-pydantic-ai-slim[openai]==2.70.0

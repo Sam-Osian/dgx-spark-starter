@@ -2,6 +2,7 @@
 # Read-only diagnostics. Does not load a model or install anything.
 set -uo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+export PATH="${UV_INSTALL_DIR:-"$HOME/.local/bin"}:$PATH"
 failed=0
 check() {
     local label=$1
@@ -13,7 +14,9 @@ check 'OS / architecture' uname -srm
 check 'NVIDIA driver' nvidia-smi
 check 'Ollama version' ollama --version
 check 'Downloaded models' ollama list
-check 'Project Python dependencies' "$ROOT/.venv/bin/python" -m pip check
+check 'uv version' uv --version
+check 'Project lockfile' uv lock --check --offline --project "$ROOT"
+check 'Project Python dependencies' uv pip check --python "$ROOT/.venv/bin/python"
 check 'Pydantic AI imports' "$ROOT/.venv/bin/python" -c \
     'from pydantic_ai import Agent, NativeOutput; from pydantic_ai.models.ollama import OllamaModel; print("OK")'
 if command -v code >/dev/null; then check 'VS Code version' code --version; fi
